@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minimal Image Editor</title>
+  <style>
+    :root {
+      --bg: #0f172a;         /* slate-900 */
+      --panel: #111827;      /* gray-900 */
+      --panel-2: #1f2937;    /* gray-800 */
+      --text: #e5e7eb;       /* gray-200 */
+      --subtle: #9ca3af;     /* gray-400 */
+      --brand: #22d3ee;      /* cyan-400 */
+      --accent: #a78bfa;     /* violet-400 */
+      --danger: #f43f5e;     /* rose-500 */
+      --ok: #10b981;         /* emerald-500 */
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: radial-gradient(1200px 600px at 20% -10%, #1e293b, transparent), var(--bg);
+      color: var(--text); font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid; grid-template-rows: auto 1fr auto; gap: 10px;
+    }
+    header {
+      display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.12)), var(--panel);
+      box-shadow: 0 6px 18px rgba(0,0,0,.35);
+      position: sticky; top: 0; z-index: 5;
+    }
+    header h1 { font-size: 16px; margin: 0 6px 0 0; letter-spacing: .3px; }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .toolbar .group { display: flex; align-items: center; gap: 6px; padding: 6px; background: var(--panel-2); border-radius: 14px; }
+
+    button, label.btn, .chip {
+      appearance: none; border: 0; padding: 8px 10px; border-radius: 12px; cursor: pointer;
+      background: #0b1220; color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+      transition: transform .06s ease, box-shadow .2s ease, background .2s ease;
+      display: inline-flex; align-items: center; gap: 8px; font-weight: 600;
+    }
+    button:hover, label.btn:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+    button:active, label.btn:active { transform: translateY(1px) scale(.99); }
+    button[disabled] { opacity: .5; pointer-events: none; }
+
+    input[type="range"] { accent-color: var(--brand); }
+    input[type="color"] { width: 36px; height: 36px; border: none; background: transparent; padding: 0; }
+    .chip { background: #0b1220; color: var(--subtle); font-weight: 600; padding: 6px 8px; }
+
+    main { display: grid; grid-template-columns: 260px 1fr; gap: 10px; padding: 0 10px 10px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+    aside { background: var(--panel); border-radius: 16px; padding: 10px; display: grid; gap: 10px; align-content: start; }
+    aside h3 { margin: 6px 6px 0; font-size: 13px; color: var(--subtle); font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
+
+    .card { background: var(--panel-2); border-radius: 16px; padding: 10px; display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+
+    #stage-wrap {
+      background: repeating-conic-gradient(#1f2937 0% 25%, #111827 0% 50%) 50% / 20px 20px;
+      border-radius: 16px; position: relative; overflow: hidden;
+      display: grid; place-items: center; min-height: 60vh; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+    }
+    canvas { max-width: 100%; height: auto; background: #000; border-radius: 8px; }
+
+    #dropzone { border: 2px dashed rgba(255,255,255,.2); border-radius: 14px; padding: 26px; text-align: center; color: var(--subtle); }
+
+    .status { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--panel); border-top: 1px solid rgba(255,255,255,.05); }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 6px; }
+
+    /* crop overlay */
+    .select-rect { position: absolute; border: 2px dashed var(--brand); background: rgba(34, 211, 238, .12); pointer-events: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🖼️ Minimal Image Editor</h1>
+    <div class="toolbar">
+      <div class="group">
+        <label class="btn" title="Open image (O)">
+          <input id="file" type="file" accept="image/*" hidden />
+          Open
+        </label>
+        <button id="download" title="Export (E)" disabled>Export</button>
+        <button id="reset" title="Reset (R)" disabled>Reset</button>
+      </div>
+      <div class="group">
+        <button id="undo" title="Undo (Ctrl/Cmd+Z)" disabled>Undo</button>
+        <button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>Redo</button>
+      </div>
+      <div class="group">
+        <button data-tool="move" class="tool" title="Pan/Move (V)">Move</button>
+        <button data-tool="draw" class="tool" title="Brush (B)">Brush</button>
+        <button data-tool="text" class="tool" title="Text (T)">Text</button>
+        <button data-tool="crop" class="tool" title="Crop (C)">Crop</button>
+      </div>
+      <div class="group">
+        <button id="rotateL" title="Rotate Left (,)">⟲</button>
+        <button id="rotateR" title="Rotate Right (.)">⟳</button>
+        <button id="flipH" title="Flip Horizontal">⇋</button>
+        <button id="flipV" title="Flip Vertical">⇅</button>
+      </div>
+    </div>
+    <span class="chip">Tip: drag & drop an image</span>
+  </header>
+
+  <main>
+    <aside>
+      <div class="card">
+        <h3>Brush</h3>
+        <div class="row"><input id="brushSize" type="range" min="1" max="100" value="18"><span id="brushSizeVal" class="chip">18 px</span></div>
+        <div class="row"><input id="brushOpacity" type="range" min="0" max="1" value="1" step="0.01"><span id="brushOpacityVal" class="chip">100%</span></div>
+        <div class="row"><input id="brushColor" type="color" value="#ffffff"><span class="chip">Color</span></div>
+        <div class="row"><button id="eraser">Eraser</button><button id="clear">Clear All</button></div>
+      </div>
+
+      <div class="card">
+        <h3>Filters</h3>
+        <div class="row"><input id="slBrightness" type="range" min="-100" max="100" value="0"><span class="chip">Brightness</span></div>
+        <div class="row"><input id="slContrast" type="range" min="-100" max="100" value="0"><span class="chip">Contrast</span></div>
+        <div class="row"><input id="slSaturation" type="range" min="-100" max="100" value="0"><span class="chip">Saturation</span></div>
+        <div class="row"><input id="slBlur" type="range" min="0" max="10" value="0" step="0.1"><span class="chip">Blur</span></div>
+        <div class="row"><input id="slGrayscale" type="range" min="0" max="100" value="0"><span class="chip">Grayscale</span></div>
+        <div class="row"><input id="slSepia" type="range" min="0" max="100" value="0"><span class="chip">Sepia</span></div>
+        <button id="applyFilters">Apply Filters</button>
+      </div>
+
+      <div class="card">
+        <h3>Text</h3>
+        <input id="textInput" placeholder="Type and click on image" />
+        <div class="row"><input id="textSize" type="range" min="10" max="200" value="48"><span id="textSizeVal" class="chip">48 px</span></div>
+        <div class="row"><input id="textColor" type="color" value="#ffffff"><span class="chip">Color</span></div>
+        <div class="row"><select id="textWeight"><option>normal</option><option selected>bold</option><option>bolder</option></select><span class="chip">Weight</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Export</h3>
+        <div class="row"><select id="fmt"><option>png</option><option>jpeg</option><option>webp</option></select><span class="chip">Format</span></div>
+        <div class="row"><input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.92"><span id="qualityVal" class="chip">92%</span></div>
+      </div>
+
+      <p style="color:var(--subtle);margin:0 6px;">Shortcuts: <span class="kbd">O</span> open, <span class="kbd">E</span> export, <span class="kbd">R</span> reset, <span class="kbd">V</span> move, <span class="kbd">B</span> brush, <span class="kbd">T</span> text, <span class="kbd">C</span> crop, <span class="kbd">,</span>/<span class="kbd">.</span> rotate, <span class="kbd">Ctrl/Cmd+Z</span> undo, <span class="kbd">Ctrl/Cmd+Shift+Z</span> redo.</p>
+    </aside>
+
+    <section id="stage-wrap">
+      <div id="dropzone">
+        <p><strong>Drop an image</strong> here or click <label for="file" class="btn">Browse</label></p>
+        <p style="color:var(--subtle)">PNG, JPG, WEBP — nothing leaves your browser.</p>
+      </div>
+      <canvas id="canvas" hidden></canvas>
+      <div class="select-rect" id="selectRect" hidden></div>
+    </section>
+  </main>
+
+  <div class="status">
+    <span id="statusLeft">No image loaded.</span>
+    <span id="statusRight">1:1</span>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('file');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const dropzone = document.getElementById('dropzone');
+    const statusLeft = document.getElementById('statusLeft');
+    const statusRight = document.getElementById('statusRight');
+    const downloadBtn = document.getElementById('download');
+    const resetBtn = document.getElementById('reset');
+    const undoBtn = document.getElementById('undo');
+    const redoBtn = document.getElementById('redo');
+    const rotateL = document.getElementById('rotateL');
+    const rotateR = document.getElementById('rotateR');
+    const flipH = document.getElementById('flipH');
+    const flipV = document.getElementById('flipV');
+
+    const brushSize = document.getElementById('brushSize');
+    const brushSizeVal = document.getElementById('brushSizeVal');
+    const brushOpacity = document.getElementById('brushOpacity');
+    const brushOpacityVal = document.getElementById('brushOpacityVal');
+    const brushColor = document.getElementById('brushColor');
+    const eraserBtn = document.getElementById('eraser');
+    const clearBtn = document.getElementById('clear');
+
+    const slBrightness = document.getElementById('slBrightness');
+    const slContrast = document.getElementById('slContrast');
+    const slSaturation = document.getElementById('slSaturation');
+    const slBlur = document.getElementById('slBlur');
+    const slGrayscale = document.getElementById('slGrayscale');
+    const slSepia = document.getElementById('slSepia');
+    const applyFilters = document.getElementById('applyFilters');
+
+    const textInput = document.getElementById('textInput');
+    const textSize = document.getElementById('textSize');
+    const textSizeVal = document.getElementById('textSizeVal');
+    const textColor = document.getElementById('textColor');
+    const textWeight = document.getElementById('textWeight');
+
+    const fmt = document.getElementById('fmt');
+    const quality = document.getElementById('quality');
+    const qualityVal = document.getElementById('qualityVal');
+
+    const selectRect = document.getElementById('selectRect');
+
+    let tool = 'move';
+    let img = new Image();
+    let isDrawing = false;
+    let last = null;
+    let selecting = false;
+    let selStart = null;
+    let history = []; // stack of ImageData
+    let redoStack = [];
+
+    function setTool(name){
+      tool = name;
+      document.querySelectorAll('.tool').forEach(b => b.style.boxShadow = 'inset 0 0 0 1px rgba(255,255,255,.06)');
+      const active = document.querySelector(`.tool[data-tool="${name}"]`);
+      if (active) active.style.boxShadow = 'inset 0 0 0 2px var(--brand)';
+      selectRect.hidden = true;
+      updateStatus();
+    }
+
+    function enableUI(on){
+      downloadBtn.disabled = resetBtn.disabled = !on;
+      ['undo','redo','rotateL','rotateR','flipH','flipV','applyFilters','clear'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.disabled = !on;
+      });
+    }
+
+    function pushHistory(){
+      try {
+        history.push(ctx.getImageData(0,0,canvas.width,canvas.height));
+        if (history.length > 30) history.shift();
+        undoBtn.disabled = history.length <= 1;
+        redoStack = []; redoBtn.disabled = true;
+      } catch(e){ console.warn('History skipped', e); }
+    }
+
+    function loadImage(src){
+      img = new Image();
+      img.onload = () => {
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0);
+        canvas.hidden = false; dropzone.hidden = true; enableUI(true);
+        pushHistory();
+        updateStatus();
+      };
+      img.onerror = () => alert('Could not load image.');
+      img.src = src;
+    }
+
+    function updateStatus(){
+      if (canvas.hidden) { statusLeft.textContent = 'No image loaded.'; return; }
+      statusLeft.textContent = `Tool: ${tool}`;
+      statusRight.textContent = `${canvas.width}×${canvas.height}`;
+      brushSizeVal.textContent = `${brushSize.value} px`;
+      brushOpacityVal.textContent = `${Math.round(brushOpacity.value*100)}%`;
+      textSizeVal.textContent = `${textSize.value} px`;
+      qualityVal.textContent = `${Math.round(quality.value*100)}%`;
+    }
+
+    function openFile(f){
+      const reader = new FileReader();
+      reader.onload = e => loadImage(e.target.result);
+      reader.readAsDataURL(f);
+    }
+
+    fileInput.addEventListener('change', e => {
+      const f = e.target.files[0]; if (f) openFile(f);
+      fileInput.value = '';
+    });
+
+    // drag & drop
+    ['dragenter','dragover'].forEach(ev=>{
+      document.addEventListener(ev, e=>{ e.preventDefault(); });
+    });
+    document.addEventListener('drop', e=>{
+      e.preventDefault();
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]);
+    });
+
+    // drawing
+    function getPos(e){
+      const r = canvas.getBoundingClientRect();
+      const x = (e.touches? e.touches[0].clientX : e.clientX) - r.left;
+      const y = (e.touches? e.touches[0].clientY : e.clientY) - r.top;
+      const scaleX = canvas.width / r.width; const scaleY = canvas.height / r.height;
+      return { x: x * scaleX, y: y * scaleY };
+    }
+
+    function beginDraw(e){
+      if (canvas.hidden) return;
+      if (tool === 'draw') {
+        isDrawing = true; last = getPos(e);
+        ctx.save();
+        ctx.globalAlpha = parseFloat(brushOpacity.value);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.lineWidth = parseFloat(brushSize.value);
+        ctx.strokeStyle = eraserBtn.classList.contains('on') ? '#000000' : brushColor.value;
+        ctx.globalCompositeOperation = eraserBtn.classList.contains('on') ? 'destination-out' : 'source-over';
+        pushHistory();
+      } else if (tool === 'text') {
+        const p = getPos(e);
+        ctx.save();
+        ctx.fillStyle = textColor.value;
+        ctx.textBaseline = 'top';
+        ctx.font = `${textWeight.value} ${parseInt(textSize.value)}px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+        ctx.fillText(textInput.value || 'Text', p.x, p.y);
+        ctx.restore();
+        pushHistory();
+      } else if (tool === 'crop') {
+        selecting = true; selStart = getPos(e);
+        selectRect.hidden = false; updateSelectRect(selStart, selStart);
+      }
+    }
+
+    function moveDraw(e){
+      if (!isDrawing) return;
+      const p = getPos(e);
+      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      last = p;
+    }
+
+    function endDraw(){
+      if (isDrawing) { ctx.restore(); isDrawing = false; }
+      if (selecting) { selecting = false; }
+    }
+
+    function updateSelectRect(a, b){
+      const r = canvas.getBoundingClientRect();
+      const scaleX = r.width / canvas.width; const scaleY = r.height / canvas.height;
+      const x = Math.min(a.x, b.x) * scaleX + r.left - r.left;
+      const y = Math.min(a.y, b.y) * scaleY + r.top - r.top;
+      const w = Math.abs(a.x - b.x) * scaleX;
+      const h = Math.abs(a.y - b.y) * scaleY;
+      Object.assign(selectRect.style, { left: x+"px", top: y+"px", width: w+"px", height: h+"px" });
+    }
+
+    canvas.addEventListener('mousedown', beginDraw);
+    canvas.addEventListener('touchstart', beginDraw, {passive:false});
+    canvas.addEventListener('mousemove', e=>{
+      if (tool==='crop' && selecting){ updateSelectRect(selStart, getPos(e)); }
+      moveDraw(e);
+    });
+    canvas.addEventListener('touchmove', e=>{ if(tool==='draw'){ e.preventDefault(); moveDraw(e); } if(tool==='crop'&&selecting){ updateSelectRect(selStart, getPos(e)); } }, {passive:false});
+    window.addEventListener('mouseup', endDraw);
+    window.addEventListener('touchend', endDraw);
+
+    // tools
+    document.querySelectorAll('.tool').forEach(b=>{
+      b.addEventListener('click', ()=> setTool(b.dataset.tool));
+    });
+    setTool('move');
+
+    eraserBtn.addEventListener('click', ()=>{
+      eraserBtn.classList.toggle('on');
+      eraserBtn.textContent = eraserBtn.classList.contains('on') ? 'Eraser: On' : 'Eraser';
+    });
+    clearBtn.addEventListener('click', ()=>{ if(!canvas.hidden){ pushHistory(); ctx.clearRect(0,0,canvas.width,canvas.height); } });
+
+    // filters
+    function buildFilter(){
+      const b = parseInt(slBrightness.value);
+      const c = parseInt(slContrast.value);
+      const s = parseInt(slSaturation.value);
+      const bl = parseFloat(slBlur.value);
+      const g = parseInt(slGrayscale.value);
+      const sp = parseInt(slSepia.value);
+      return `brightness(${100+b}%) contrast(${100+c}%) saturate(${100+s}%) blur(${bl}px) grayscale(${g}%) sepia(${sp}%)`;
+    }
+
+    applyFilters.addEventListener('click', ()=>{
+      if (canvas.hidden) return;
+      pushHistory();
+      const tmp = document.createElement('canvas');
+      tmp.width = canvas.width; tmp.height = canvas.height;
+      const tctx = tmp.getContext('2d');
+      tctx.filter = buildFilter();
+      tctx.drawImage(canvas, 0, 0);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(tmp, 0, 0);
+      // reset sliders visually but keep user values if they want to chain; comment next lines to keep cumulative appearance on sliders
+      slBrightness.value = 0; slContrast.value = 0; slSaturation.value = 0; slBlur.value = 0; slGrayscale.value = 0; slSepia.value = 0;
+      updateStatus();
+    });
+
+    // rotate & flip
+    function transformCanvas(deg=0, flipX=false, flipY=false){
+      if (canvas.hidden) return;
+      pushHistory();
+      const w = canvas.width, h = canvas.height;
+      let tw = w, th = h;
+      if (deg % 180 !== 0) { tw = h; th = w; }
+      const tmp = document.createElement('canvas'); tmp.width = tw; tmp.height = th; const tctx = tmp.getContext('2d');
+      tctx.translate(tw/2, th/2);
+      tctx.rotate(deg * Math.PI/180);
+      tctx.scale(flipX?-1:1, flipY?-1:1);
+      tctx.drawImage(canvas, -w/2, -h/2);
+      canvas.width = tw; canvas.height = th;
+      ctx.clearRect(0,0,tw,th); ctx.drawImage(tmp, 0, 0);
+      updateStatus();
+    }
+
+    rotateL.addEventListener('click', ()=> transformCanvas(-90, false, false));
+    rotateR.addEventListener('click', ()=> transformCanvas(90, false, false));
+    flipH.addEventListener('click', ()=> transformCanvas(0, true, false));
+    flipV.addEventListener('click', ()=> transformCanvas(0, false, true));
+
+    // crop confirm (double click or Enter)
+    window.addEventListener('dblclick', ()=>{
+      if (tool==='crop' && !selectRect.hidden){ doCrop(); }
+    });
+    window.addEventListener('keydown', e=>{ if(e.key==='Enter' && tool==='crop' && !selectRect.hidden) doCrop(); });
+
+    function doCrop(){
+      const r = canvas.getBoundingClientRect();
+      const sr = selectRect.getBoundingClientRect();
+      const scaleX = canvas.width / r.width; const scaleY = canvas.height / r.height;
+      const x = Math.max(0, (sr.left - r.left) * scaleX);
+      const y = Math.max(0, (sr.top - r.top) * scaleY);
+      const w = Math.min(canvas.width - x, sr.width * scaleX);
+      const h = Math.min(canvas.height - y, sr.height * scaleY);
+      if (w < 2 || h < 2) { selectRect.hidden = true; return; }
+      pushHistory();
+      const tmp = ctx.getImageData(x, y, w, h);
+      canvas.width = w; canvas.height = h; ctx.putImageData(tmp, 0, 0);
+      selectRect.hidden = true; setTool('move');
+    }
+
+    // undo/redo
+    undoBtn.addEventListener('click', ()=>{
+      if (history.length > 1){
+        const cur = history.pop(); redoStack.push(cur);
+        const prev = history[history.length-1];
+        canvas.width = prev.width; canvas.height = prev.height; ctx.putImageData(prev,0,0);
+        redoBtn.disabled = false; undoBtn.disabled = history.length <= 1;
+        updateStatus();
+      }
+    });
+    redoBtn.addEventListener('click', ()=>{
+      if (redoStack.length){
+        const next = redoStack.pop(); history.push(next);
+        canvas.width = next.width; canvas.height = next.height; ctx.putImageData(next,0,0);
+        undoBtn.disabled = history.length <= 1; redoBtn.disabled = redoStack.length===0;
+        updateStatus();
+      }
+    });
+
+    // export
+    downloadBtn.addEventListener('click', ()=>{
+      if (canvas.hidden) return;
+      const type = `image/${fmt.value}`;
+      const url = canvas.toDataURL(type, fmt.value==='png'? undefined : parseFloat(quality.value));
+      const a = document.createElement('a');
+      a.href = url; a.download = `edited.${fmt.value}`; a.click();
+    });
+
+    resetBtn.addEventListener('click', ()=>{ if(!canvas.hidden) loadImage(canvas.toDataURL()); });
+
+    // live labels
+    [brushSize, brushOpacity, textSize, quality].forEach(inp=> inp.addEventListener('input', updateStatus));
+
+    // keyboard shortcuts
+    window.addEventListener('keydown', e=>{
+      if (e.target.matches('input, textarea, select')) return;
+      if (e.key==='o' || e.key==='O') fileInput.click();
+      if (e.key==='e' || e.key==='E') downloadBtn.click();
+      if (e.key==='r' || e.key==='R') resetBtn.click();
+      if (e.key==='v' || e.key==='V') setTool('move');
+      if (e.key==='b' || e.key==='B') setTool('draw');
+      if (e.key==='t' || e.key==='T') setTool('text');
+      if (e.key==='c' || e.key==='C') setTool('crop');
+      if (e.key===',') rotateL.click();
+      if (e.key==='.') rotateR.click();
+      if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey) { e.preventDefault(); undoBtn.click(); }
+      if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && e.shiftKey) { e.preventDefault(); redoBtn.click(); }
+    });
+
+    // init
+    updateStatus();
+  </script>
+</body>
+</html>
